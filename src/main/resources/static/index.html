@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Morphoverse Lite</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 750px; margin: 30px auto; padding: 0 15px; }
+    form, .project { border: 1px solid #ccc; border-radius: 6px; padding: 12px; margin-bottom: 12px; }
+    input { display: block; margin-bottom: 8px; padding: 6px; width: 100%; box-sizing: border-box; }
+    button { padding: 6px 12px; cursor: pointer; }
+    #message { display: none; padding: 8px; margin-bottom: 12px; border-radius: 4px; }
+    .error { background: #fde2e2; color: #a00; }
+    .ok { background: #e2f5e2; color: #070; }
+    .milestones { margin-top: 12px; padding-top: 8px; border-top: 1px dashed #ccc; }
+    .milestone { background: #f4f4f4; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px; font-size: 14px; }
+    .milestone-form input { display: inline-block; width: auto; margin-right: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Morphoverse Lite</h1>
+  <div id="message"></div>
+
+  <h2>Create project</h2>
+  <form id="createForm">
+    <input id="name" placeholder="Project name">
+    <input id="clientName" placeholder="Client name">
+    <input id="description" placeholder="Description">
+    <input id="targetEndDate" type="date">
+    <button type="submit">Create</button>
+  </form>
+
+  <h2>Projects</h2>
+  <div id="projects"></div>
+
+  <script>
+    const API = "/api/projects";
+
+    function showMessage(text, isError) {
+      const box = document.getElementById("message");
+      box.textContent = text;
+      box.className = isError ? "error" : "ok";
+      box.style.display = "block";
+    }
+
+    // show a success message, or the error message sent by the API
+    async function handleResponse(response, successText) {
+      if (response.ok) {
+        showMessage(successText, false);
+        loadProjects();
+      } else {
+        const error = await response.json();
+        showMessage(error.message || "Something went wrong", true);
+      }
+    }
+
+    async function loadProjects() {
+      const response = await fetch(API);
+      const projects = await response.json();
+      const container = document.getElementById("projects");
+      container.innerHTML = "";
+
+      for (const p of projects) {
+        const div = document.createElement("div");
+        div.className = "project";
+
+        // project info
+        const info = document.createElement("p");
+        info.textContent = p.name + " (" + p.clientName + ") - target end: "
+                           + p.targetEndDate + " - state: " + p.state;
+        div.appendChild(info);
+
+        // state dropdown and button
+        const select = document.createElement("select");
+        select.id = "state-" + p.id;
+        for (const s of ["SETUP", "ACTIVE", "PAUSED", "CLOSED"]) {
+          const option = document.createElement("option");
+          option.value = s;
+          option.textContent = s;
+          select.appendChild(option);
+        }
+        div.appendChild(select);
+
+        const button = document.createElement("button");
+        button.textContent = "Change state";
+        button.onclick = function () { changeState(p.id); };
+        div.appendChild(button);
+
+        // milestones section
+        const msBox = document.createElement("div");
+        msBox.className = "milestones";
+
+        const msTitle = document.createElement("strong");
+        msTitle.textContent = "Milestones";
+        msBox.appendChild(msTitle);
+
+        const msList = document.createElement("div");
+        msList.id = "ms-list-" + p.id;
+        msBox.appendChild(msList);
+
+        // add-milestone form
+        const msForm = document.createElement("div");
+        msForm.className = "milestone-form";
+
+        const msName = document.createElement("input");
+        msName.id = "ms-name-" + p.id;
+        msName.placeholder = "Milestone name";
+        msForm.appendChild(msName);
+
+        const msDate = document.createElement("input");
+        msDate.id = "ms-date-" + p.id;
+        msDate.type = "date";
+        msForm.appendChild(msDate);
+
+        const msButton = document.createElement("button");
+        msButton.textContent = "Add milestone";
+        msButton.onclick = function () { addMilestone(p.id); };
+        msForm.appendChild(msButton);
+
+        msBox.appendChild(msForm);
+        div.appendChild(msBox);
+
+        container.appendChild(div);
+
+        loadMilestones(p.id);
+      }
+    }
+
+    async function loadMilestones(projectId) {
+      const response = await fetch(API + "/" + projectId + "/milestones");
+      const milestones = await response.json();
+      const list = document.getElementById("ms-list-" + projectId);
+      list.innerHTML = "";
+
+      if (milestones.length === 0) {
+        list.textContent = "No milestones yet";
+        return;
+      }
+
+      for (const m of milestones) {
+        const item = document.createElement("div");
+        item.className = "milestone";
+        item.textContent = m.name + " - baseline: " + m.baselineDate
+                           + " - current: " + m.currentDate + " - " + m.state;
+        list.appendChild(item);
+      }
+    }
+
+    async function addMilestone(projectId) {
+      const body = {
+        name: document.getElementById("ms-name-" + projectId).value,
+        baselineDate: document.getElementById("ms-date-" + projectId).value || null
+      };
+      const response = await fetch(API + "/" + projectId + "/milestones", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      handleResponse(response, "Milestone added");
+    }
+
+    async function changeState(id) {
+      const newState = document.getElementById("state-" + id).value;
+      const response = await fetch(API + "/" + id + "/state", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ newState: newState })
+      });
+      handleResponse(response, "State changed to " + newState);
+    }
+
+    document.getElementById("createForm").onsubmit = async function (event) {
+      event.preventDefault();
+      const body = {
+        name: document.getElementById("name").value,
+        clientName: document.getElementById("clientName").value,
+        description: document.getElementById("description").value,
+        targetEndDate: document.getElementById("targetEndDate").value || null
+      };
+      const response = await fetch(API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      handleResponse(response, "Project created");
+    };
+
+    loadProjects();
+  </script>
+</body>
+</html>
